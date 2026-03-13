@@ -1,0 +1,109 @@
+import logging
+import os
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+
+from app.auth import verify_api_key
+from app.utils.cleanup import make_job_dir
+from app.utils.folders import (
+    create_folder, get_folder_path, unique_filename,
+)
+from app.utils.url import file_url, folder_url
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(dependencies=[Depends(verify_api_key)])
+
+MAX_BYTES = 500 * 1024 * 1024  # 500 MB
+
+
+async def _write_upload(file: UploadFile, dest_path: str) -> int:
+    """Stream *file* to *dest_path* in 1 MB chunks. Returns bytes written.
+    Cleans up the partial file and raises HTTPException on limit or OS error."""
+    size = 0
+    try:
+        with open(dest_path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    out.close()
+                    os.remove(dest_path)
+                    raise HTTPException(
+                        status_code=413,
+                        detail={"error": "File exceeds 500 MB limit"},
+                    )
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except OSError as e:
+        logger.error("Failed to write upload to %s: %s", dest_path, e)
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise HTTPException(status_code=500, detail={"error": f"Failed to save file: {e.strerror}"})
+    return size
+
+
+@router.post("/upload", tags=["storage"], summary="Upload a binary file and get a persistent URL")
+async def upload_file(
+    file: UploadFile = File(...),
+    folder: str | None = Form(default=None),
+):
+    """
+    Convert any binary file (video, audio, image, etc.) into a persistent URL.
+
+    Accepts multipart form data. Optionally saves into a named folder — if the folder
+    does not exist it is created automatically. Maximum file size: **500 MB**.
+
+    **Upload to general job storage:**
+    ```bash
+    curl -X POST http://localhost:9000/upload \\
+      -H "X-API-Key: your-secret-key" \\
+      -F "file=@/path/to/video.mp4"
+    ```
+
+    **Upload into a named folder:**
+    ```bash
+    curl -X POST http://localhost:9000/upload \\
+      -H "X-API-Key: your-secret-key" \\
+      -F "file=@/path/to/photo.jpg" \\
+      -F "folder=my-project"
+    ```
+
+    If a file with the same name already exists in the folder, a numeric suffix is added
+    automatically (`photo_1.jpg`, `photo_2.jpg`, …).
+    """
+    raw_name = os.path.basename(file.filename or "upload") or "upload"
+
+    if folder:
+        # ── Store in named folder ──────────────────────────────────────────
+        try:
+            safe_folder = create_folder(folder)
+        except OSError as e:
+            logger.error("Failed to create/access folder '%s': %s", folder, e)
+            raise HTTPException(status_code=500, detail={"error": f"Could not access folder: {e.strerror}"})
+
+        folder_path = get_folder_path(safe_folder)
+        filename = unique_filename(folder_path, raw_name)
+        dest_path = os.path.join(folder_path, filename)
+        size = await _write_upload(file, dest_path)
+        logger.info("Upload saved to folder '%s' as '%s' (%d bytes)", safe_folder, filename, size)
+        return {
+            "url": folder_url(safe_folder, filename),
+            "filename": filename,
+            "folder": safe_folder,
+            "size_bytes": size,
+        }
+
+    else:
+        # ── Store as a regular job output ──────────────────────────────────
+        job_dir = make_job_dir()
+        dest_path = os.path.join(job_dir, raw_name)
+        size = await _write_upload(file, dest_path)
+        job_id = os.path.basename(job_dir)
+        logger.info("Upload saved as job '%s' file '%s' (%d bytes)", job_id, raw_name, size)
+        return {
+            "url": file_url(job_id, raw_name),
+            "filename": raw_name,
+            "job_id": job_id,
+            "size_bytes": size,
+        }
