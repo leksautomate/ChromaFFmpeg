@@ -60,6 +60,51 @@ async def create_folder_endpoint(req: CreateFolderRequest):
     return {"name": name, "created": True}
 
 
+@router.get("/folders/{name}/urls", tags=["storage"], summary="Get folder URLs as a /combine payload")
+async def get_folder_urls(
+    name: str,
+    type: str = Query("video", description="'video' or 'audio'"),
+    reencode: bool = Query(False, description="Pass true for mixed-codec sources"),
+):
+    """
+    Return all file URLs in a folder formatted as a ready-to-POST `/combine` body.
+
+    **Query parameters:**
+    - `type`: `video` (default) or `audio`
+    - `reencode`: `true` for mixed-codec sources
+
+    ```bash
+    curl "http://localhost:9000/folders/my-project/urls?type=video&reencode=false" \\
+      -H "X-API-Key: your-secret-key"
+    ```
+
+    The response can be piped directly into `POST /combine`:
+    ```bash
+    curl -X POST http://localhost:9000/combine \\
+      -H "Content-Type: application/json" \\
+      -H "X-API-Key: your-secret-key" \\
+      -d "$(curl -s 'http://localhost:9000/folders/my-project/urls?type=video' -H 'X-API-Key: your-secret-key' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(json.dumps({\"type\":d[\"type\"],\"urls\":d[\"urls\"],\"reencode\":d[\"reencode\"]}))')"
+    ```
+    """
+    if type not in ("video", "audio"):
+        raise HTTPException(status_code=400, detail={"error": "type must be 'video' or 'audio'"})
+    safe = sanitize_name(name)
+    if not os.path.isdir(get_folder_path(safe)):
+        raise HTTPException(status_code=404, detail={"error": "Folder not found"})
+    try:
+        files = list_folder_files(safe)
+    except OSError as e:
+        logger.error("Failed to list folder '%s': %s", safe, e)
+        raise HTTPException(status_code=500, detail={"error": "Failed to read folder contents"})
+    urls = [folder_url(safe, f["filename"]) for f in files]
+    return {
+        "type": type,
+        "urls": urls,
+        "reencode": reencode,
+        "count": len(urls),
+    }
+
+
 @router.get("/folders/{name}", tags=["storage"], summary="List files in a folder")
 async def get_folder(name: str):
     """
@@ -113,51 +158,6 @@ async def delete_folder_endpoint(name: str):
         logger.error("Failed to delete folder '%s': %s", safe, e)
         raise HTTPException(status_code=500, detail={"error": "Failed to delete folder"})
     return {"deleted": safe}
-
-
-@router.get("/folders/{name}/urls", tags=["storage"], summary="Get folder URLs as a /combine payload")
-async def get_folder_urls(
-    name: str,
-    type: str = Query("video", description="'video' or 'audio'"),
-    reencode: bool = Query(False, description="Pass true for mixed-codec sources"),
-):
-    """
-    Return all file URLs in a folder formatted as a ready-to-POST `/combine` body.
-
-    **Query parameters:**
-    - `type`: `video` (default) or `audio`
-    - `reencode`: `true` for mixed-codec sources
-
-    ```bash
-    curl "http://localhost:9000/folders/my-project/urls?type=video&reencode=false" \\
-      -H "X-API-Key: your-secret-key"
-    ```
-
-    The response can be piped directly into `POST /combine`:
-    ```bash
-    curl -X POST http://localhost:9000/combine \\
-      -H "Content-Type: application/json" \\
-      -H "X-API-Key: your-secret-key" \\
-      -d "$(curl -s 'http://localhost:9000/folders/my-project/urls?type=video' -H 'X-API-Key: your-secret-key' | python3 -c 'import sys,json; d=json.load(sys.stdin); print(json.dumps({\"type\":d[\"type\"],\"urls\":d[\"urls\"],\"reencode\":d[\"reencode\"]}))')"
-    ```
-    """
-    if type not in ("video", "audio"):
-        raise HTTPException(status_code=400, detail={"error": "type must be 'video' or 'audio'"})
-    safe = sanitize_name(name)
-    if not os.path.isdir(get_folder_path(safe)):
-        raise HTTPException(status_code=404, detail={"error": "Folder not found"})
-    try:
-        files = list_folder_files(safe)
-    except OSError as e:
-        logger.error("Failed to list folder '%s': %s", safe, e)
-        raise HTTPException(status_code=500, detail={"error": "Failed to read folder contents"})
-    urls = [folder_url(safe, f["filename"]) for f in files]
-    return {
-        "type": type,
-        "urls": urls,
-        "reencode": reencode,
-        "count": len(urls),
-    }
 
 
 @router.delete("/folders/{name}/{filename}", tags=["storage"], summary="Delete a file from a folder")
