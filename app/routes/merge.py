@@ -83,6 +83,7 @@ async def merge_audio_video(req: MergeRequest):
             )
             await run_ffmpeg([
                 "-y", "-i", video_path, "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0",
                 "-c:v", "copy", "-c:a", "copy", "-shortest",
                 output_path,
             ])
@@ -90,6 +91,7 @@ async def merge_audio_video(req: MergeRequest):
         elif req.strategy == "trim":
             await run_ffmpeg([
                 "-y", "-i", video_path, "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0",
                 "-c:v", "copy", "-c:a", "copy", "-shortest",
                 output_path,
             ])
@@ -98,6 +100,7 @@ async def merge_audio_video(req: MergeRequest):
             if video_dur > audio_dur:
                 await run_ffmpeg([
                     "-y", "-i", video_path, "-i", audio_path,
+                    "-map", "0:v:0", "-map", "1:a:0",
                     "-t", f"{audio_dur:.6f}",
                     "-c:v", "copy", "-c:a", "copy",
                     output_path,
@@ -106,6 +109,7 @@ async def merge_audio_video(req: MergeRequest):
                 pts_expr = f"{audio_dur / video_dur:.6f}"
                 await run_ffmpeg([
                     "-y", "-i", video_path, "-i", audio_path,
+                    "-map", "0:v:0", "-map", "1:a:0",
                     "-filter:v", f"setpts={pts_expr}*PTS",
                     "-c:a", "copy", "-shortest",
                     output_path,
@@ -113,6 +117,7 @@ async def merge_audio_video(req: MergeRequest):
             else:
                 await run_ffmpeg([
                     "-y", "-i", video_path, "-i", audio_path,
+                    "-map", "0:v:0", "-map", "1:a:0",
                     "-c:v", "copy", "-c:a", "copy",
                     output_path,
                 ])
@@ -122,6 +127,7 @@ async def merge_audio_video(req: MergeRequest):
             pts_expr = f"{1.0 / speed_factor:.6f}"
             await run_ffmpeg([
                 "-y", "-i", video_path, "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0",
                 "-filter:v", f"setpts={pts_expr}*PTS",
                 "-c:a", "copy", "-shortest",
                 output_path,
