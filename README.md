@@ -61,29 +61,26 @@ The API and UI are live at `http://your-vps-ip:9000`
 
 ## Updating the code on your VPS
 
-SSH into your server, then pull the latest code and rebuild the container:
+SSH into your server, then run:
 
 ```bash
-cd ChromaFFmpeg
+cd /var/www/ChromaFFmpeg
+
+# Pull latest
 git pull origin master
+
+# Remove old container and image
+docker compose down
+docker rmi chromaffmpeg-chromaffmpeg --force
+
+# Rebuild and start fresh
 docker compose up --build -d
+
+# Watch logs
+docker logs -f chromaffmpeg-chromaffmpeg-1
 ```
 
-That's it. Your `.env` and `/data/` volumes are untouched — no files are lost.
-
-**Verify the update worked:**
-
-```bash
-docker compose ps          # container should be Up
-curl http://localhost:9000/health
-# {"status":"ok"}
-```
-
-**If the container fails to start, check the logs:**
-
-```bash
-docker compose logs --tail=50
-```
+Your `.env` and `/data/` volumes are untouched — no files are lost.
 
 ---
 
