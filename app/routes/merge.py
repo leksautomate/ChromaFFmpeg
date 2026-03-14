@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -67,7 +68,8 @@ async def merge_audio_video(req: MergeRequest):
         video_dur = await probe_duration(video_path)
         audio_dur = await probe_duration(audio_path)
 
-        output_path = os.path.join(job_dir, "output.mp4")
+        output_filename = secrets.token_hex(8) + ".mp4"
+        output_path = os.path.join(job_dir, output_filename)
         warning: str | None = None
 
         durations_known = video_dur is not None and audio_dur is not None
@@ -125,7 +127,7 @@ async def merge_audio_video(req: MergeRequest):
                 output_path,
             ])
 
-        result = resolve_output(job_dir, "output.mp4", req.folder)
+        result = resolve_output(job_dir, output_filename, req.folder)
         if warning:
             result["warning"] = warning
         return result

@@ -95,11 +95,7 @@ def resolve_output(job_dir: str, filename: str, folder: str | None) -> dict:
 
     safe = sanitize_name(folder)
     folder_path = get_folder_path(safe)
-    if not os.path.isdir(folder_path):
-        raise HTTPException(
-            status_code=404,
-            detail={"error": f"Folder '{safe}' not found. Create it first via POST /folders."},
-        )
+    os.makedirs(folder_path, exist_ok=True)
 
     unique = unique_filename(folder_path, filename)
     src = os.path.join(job_dir, filename)

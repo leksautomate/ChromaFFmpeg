@@ -5,6 +5,8 @@ import aiofiles
 import httpx
 from fastapi import HTTPException
 
+from app.utils.url import get_base_url
+
 CONTENT_TYPE_EXT = {
     "video/mp4": ".mp4",
     "video/quicktime": ".mov",
@@ -31,8 +33,14 @@ async def download_file(url: str, dest_dir: str, filename_stem: str = "input") -
     ext = _ext_from_url(url)
     dest_path = os.path.join(dest_dir, filename_stem + (ext or ".tmp"))
 
+    # Include API key when downloading from own server
+    headers = {}
+    api_key = os.environ.get("API_KEY")
+    if api_key and url.startswith(get_base_url()):
+        headers["X-API-Key"] = api_key
+
     try:
-        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True, headers=headers) as client:
             async with client.stream("GET", url) as response:
                 response.raise_for_status()
 
