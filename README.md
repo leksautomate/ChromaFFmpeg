@@ -74,9 +74,9 @@ Then `cd` into that directory and run:
 # Pull latest
 git pull origin master
 
-# Remove old container and image
+# Stop container and wipe build cache
 docker compose down
-docker rmi chromaffmpeg-chromaffmpeg --force
+docker system prune -af
 
 # Rebuild and start fresh
 docker compose up --build -d
@@ -85,7 +85,7 @@ docker compose up --build -d
 docker logs -f chromaffmpeg-chromaffmpeg-1
 ```
 
-Your `.env` and `/data/` volumes are untouched — no files are lost.
+Your `.env` and `/data/` volumes are untouched — `docker system prune -af` only removes images and build cache, not volumes.
 
 ---
 
