@@ -33,10 +33,13 @@ async def combine(req: CombineRequest):
     """
     Concatenate multiple video or audio files into a single output.
 
+    Output is saved to the **`main`** folder by default. Override with `"folder"` in the request body.
+    Folders are created automatically if they don't exist. Output filename is randomized.
+
     Set `reencode: true` for mixed-codec sources (slower but always compatible).
     Use `GET /folders/{name}/urls` to get the payload directly from a folder.
 
-    **Combine videos (stream copy — all clips must share codec/resolution):**
+    **Combine videos — output goes to "main" folder by default:**
     ```bash
     curl -X POST http://localhost:9000/combine \\
       -H "Content-Type: application/json" \\
@@ -78,6 +81,22 @@ async def combine(req: CombineRequest):
           "https://example.com/part2.mp3"
         ],
         "reencode": false
+      }'
+    ```
+
+    **Override output folder:**
+    ```bash
+    curl -X POST http://localhost:9000/combine \\
+      -H "Content-Type: application/json" \\
+      -H "X-API-Key: your-secret-key" \\
+      -d '{
+        "type": "video",
+        "urls": [
+          "https://example.com/clip1.mp4",
+          "https://example.com/clip2.mp4"
+        ],
+        "reencode": false,
+        "folder": "MyProject"
       }'
     ```
     """

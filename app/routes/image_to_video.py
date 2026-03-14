@@ -60,6 +60,21 @@ async def image_to_video(req: ImageToVideoRequest):
         "resolution": "1920x1080"
       }'
     ```
+
+    **Save to a named folder (auto-created if it doesn't exist):**
+    ```bash
+    curl -X POST http://localhost:9000/image-to-video \\
+      -H "Content-Type: application/json" \\
+      -H "X-API-Key: your-secret-key" \\
+      -d '{
+        "image_url": "https://example.com/photo.png",
+        "duration": 8,
+        "animation": "zoom_in",
+        "fps": 25,
+        "resolution": "1920x1080",
+        "folder": "MyProject"
+      }'
+    ```
     """
     if not re.match(r"^\d+x\d+$", req.resolution):
         raise HTTPException(status_code=400, detail={"error": f"Invalid resolution format: {req.resolution}"})

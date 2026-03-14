@@ -105,7 +105,7 @@ async def animate(req: AnimateRequest):
       }'
     ```
 
-    **Ken Burns (pan_zoom) into a named folder:**
+    **Ken Burns (pan_zoom) into a named folder (auto-created if it doesn't exist):**
     ```bash
     curl -X POST http://localhost:9000/animate \\
       -H "Content-Type: application/json" \\

@@ -80,6 +80,23 @@ async def concat_transitions(req: TransitionsRequest):
         "transition_duration": 0.5
       }'
     ```
+
+    **Save to a named folder (auto-created if it doesn't exist):**
+    ```bash
+    curl -X POST http://localhost:9000/concat-transitions \\
+      -H "Content-Type: application/json" \\
+      -H "X-API-Key: your-secret-key" \\
+      -d '{
+        "urls": [
+          "https://example.com/clip1.mp4",
+          "https://example.com/clip2.mp4",
+          "https://example.com/clip3.mp4"
+        ],
+        "transition": "fade",
+        "transition_duration": 1.0,
+        "folder": "MyProject"
+      }'
+    ```
     """
     job_dir = make_job_dir()
     try:

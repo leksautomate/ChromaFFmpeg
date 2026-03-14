@@ -65,26 +65,36 @@ async def upload_file(
     """
     Convert any binary file (video, audio, image, etc.) into a persistent URL.
 
-    Accepts multipart form data. Optionally saves into a named folder — if the folder
-    does not exist it is created automatically. Maximum file size: **500 MB**.
+    Accepts multipart form data. Files are always stored in a named folder.
+    The default folder is chosen automatically by file type:
 
-    **Upload to general job storage:**
+    - **Audio** (`.mp3 .wav .m4a .ogg .aac .flac .opus .wma`) → `audio` folder
+    - **Everything else** (video, image, …) → `upload` folder
+
+    Pass `folder=name` to override. Folders are created automatically if they don't exist.
+    Filenames are **randomized** (8-character hex + original extension). Maximum file size: **500 MB**.
+
+    **Upload a video — goes to "upload" folder automatically:**
     ```bash
     curl -X POST http://localhost:9000/upload \\
       -H "X-API-Key: your-secret-key" \\
       -F "file=@/path/to/video.mp4"
     ```
 
-    **Upload into a named folder:**
+    **Upload an audio file — goes to "audio" folder automatically:**
+    ```bash
+    curl -X POST http://localhost:9000/upload \\
+      -H "X-API-Key: your-secret-key" \\
+      -F "file=@/path/to/track.mp3"
+    ```
+
+    **Override folder explicitly:**
     ```bash
     curl -X POST http://localhost:9000/upload \\
       -H "X-API-Key: your-secret-key" \\
       -F "file=@/path/to/photo.jpg" \\
       -F "folder=my-project"
     ```
-
-    If a file with the same name already exists in the folder, a numeric suffix is added
-    automatically (`photo_1.jpg`, `photo_2.jpg`, …).
     """
     raw_name = file.filename or "upload"
     target_folder = folder if folder else _default_folder(raw_name)

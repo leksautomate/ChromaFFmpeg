@@ -35,7 +35,7 @@ async def loop_video(req: LoopRequest):
       }'
     ```
 
-    **Save looped output to a named folder:**
+    **Save looped output to a named folder (auto-created if it doesn't exist):**
     ```bash
     curl -X POST http://localhost:9000/loop \\
       -H "Content-Type: application/json" \\

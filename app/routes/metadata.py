@@ -1,11 +1,13 @@
 import json
 import logging
+import os
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.auth import verify_api_key
+from app.utils.cleanup import cleanup_job_dir, make_job_dir
 from app.utils.ffmpeg import run_ffprobe
 
 logger = logging.getLogger(__name__)
@@ -17,30 +19,11 @@ class MetadataRequest(BaseModel):
     url: str
 
 
-@router.post("/metadata", tags=["media"], summary="Get media metadata (duration, resolution, fps, etc.)")
-async def get_metadata(req: MetadataRequest):
-    """
-    Returns duration, format, resolution, fps, bitrate, and stream counts for any media URL.
-
-    ```bash
-    curl -X POST http://localhost:9000/metadata \\
-      -H "Content-Type: application/json" \\
-      -H "X-API-Key: your-secret-key" \\
-      -d '{"url": "https://example.com/video.mp4"}'
-    ```
-    """
-    output = await run_ffprobe([
-        "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        "-show_streams",
-        req.url,
-    ])
-
+def _parse_ffprobe_output(output: str, source: str) -> dict:
     try:
         data = json.loads(output)
     except json.JSONDecodeError as e:
-        logger.error("ffprobe returned invalid JSON for %s: %s", req.url, e)
+        logger.error("ffprobe returned invalid JSON for %s: %s", source, e)
         raise HTTPException(status_code=500, detail={"error": "ffprobe returned invalid output"})
 
     fmt = data.get("format", {})
@@ -62,7 +45,7 @@ async def get_metadata(req: MetadataRequest):
         size_bytes = int(fmt.get("size", 0) or 0)
         bitrate_kbps = round(int(fmt.get("bit_rate", 0) or 0) / 1000)
     except (TypeError, ValueError) as e:
-        logger.error("Failed to parse numeric metadata fields for %s: %s", req.url, e)
+        logger.error("Failed to parse numeric metadata fields for %s: %s", source, e)
         raise HTTPException(status_code=500, detail={"error": "Failed to parse media metadata"})
 
     return {
@@ -77,3 +60,83 @@ async def get_metadata(req: MetadataRequest):
         "fps": fps,
         "bitrate_kbps": bitrate_kbps,
     }
+
+
+@router.post("/metadata", tags=["media"], summary="Get media metadata from a URL")
+async def get_metadata(req: MetadataRequest):
+    """
+    Returns duration, format, resolution, fps, bitrate, and stream counts for any media URL.
+
+    To probe a local file by uploading it directly, use `POST /metadata/upload` instead.
+
+    ```bash
+    curl -X POST http://localhost:9000/metadata \\
+      -H "Content-Type: application/json" \\
+      -H "X-API-Key: your-secret-key" \\
+      -d '{"url": "https://example.com/video.mp4"}'
+    ```
+    """
+    output = await run_ffprobe([
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        "-show_streams",
+        req.url,
+    ])
+    return _parse_ffprobe_output(output, req.url)
+
+
+@router.post("/metadata/upload", tags=["media"], summary="Get media metadata from an uploaded binary file")
+async def get_metadata_upload(file: UploadFile = File(...)):
+    """
+    Upload a binary file and get its metadata — duration, format, resolution, fps, bitrate, and stream counts.
+
+    Useful when you have a local file and don't want to upload it to storage first.
+    The file is deleted immediately after probing.
+
+    **curl:**
+    ```bash
+    curl -X POST http://localhost:9000/metadata/upload \\
+      -H "X-API-Key: your-secret-key" \\
+      -F "file=@/path/to/video.mp4"
+    ```
+
+    **Response:**
+    ```json
+    {
+      "duration_seconds": 47.32,
+      "duration_formatted": "0:00:47",
+      "format": "mov",
+      "size_bytes": 4823042,
+      "video_streams": 1,
+      "audio_streams": 1,
+      "width": 1920,
+      "height": 1080,
+      "fps": 25.0,
+      "bitrate_kbps": 2048
+    }
+    ```
+    """
+    job_dir = make_job_dir()
+    try:
+        raw_name = os.path.basename(file.filename or "upload") or "upload"
+        dest_path = os.path.join(job_dir, raw_name)
+
+        content = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(content)
+
+        output = await run_ffprobe([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+            dest_path,
+        ])
+        return _parse_ffprobe_output(output, raw_name)
+    except HTTPException:
+        raise
+    except Exception:
+        raise
+    finally:
+        cleanup_job_dir(job_dir)

@@ -90,7 +90,7 @@ async def merge_audio_video(req: MergeRequest):
       }'
     ```
 
-    **Save output to a named folder:**
+    **Save output to a named folder (auto-created if it doesn't exist):**
     ```bash
     curl -X POST http://localhost:9000/merge \\
       -H "Content-Type: application/json" \\
@@ -99,9 +99,12 @@ async def merge_audio_video(req: MergeRequest):
         "video_url": "https://example.com/video.mp4",
         "audio_url": "https://example.com/audio.mp3",
         "strategy": "trim_or_slow",
-        "folder": "MyProject"
+        "folder": "roman"
       }'
     ```
+
+    Output filename is always **randomized** (e.g. `a3f8b2c1.mp4`).
+    When `audio_volume` or `video_audio_volume` differ from their defaults, audio is re-encoded to AAC.
     """
     job_dir = make_job_dir()
     try:

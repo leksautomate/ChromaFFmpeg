@@ -38,10 +38,15 @@ async def get_folders():
 @router.post("/folders", tags=["storage"], summary="Create a folder")
 async def create_folder_endpoint(req: CreateFolderRequest):
     """
-    Create a named folder for organizing uploaded files.
+    Create a named folder for organizing files.
 
     Folder names are sanitized — only alphanumeric characters, hyphens, and underscores
-    are kept (max 64 chars). You can also create folders implicitly via `POST /upload`.
+    are kept (max 64 chars).
+
+    > **Note:** You rarely need to call this manually. Folders are created automatically
+    > by `POST /upload` and all processing endpoints (`/merge`, `/combine`, etc.)
+    > whenever a folder name is used for the first time.
+    > Built-in auto-folders: `audio` (audio uploads), `upload` (other uploads), `main` (combine output).
 
     ```bash
     curl -X POST http://localhost:9000/folders \\
