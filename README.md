@@ -10,7 +10,7 @@ A self-hosted FFmpeg API with a built-in web UI. Submit media URLs or upload bin
 
 | Endpoint | What it does | Output |
 |---|---|---|
-| `POST /merge` | Merge video + audio with configurable length strategy | URL → MP4 |
+| `POST /merge` | Merge video + audio with volume control and length strategy | URL → MP4 |
 | `POST /animate` | Apply Ken Burns, zoom, or pan effects to image or video | URL → MP4 |
 | `POST /combine` | Concatenate multiple videos or audio files | URL → MP4 / MP3 |
 | `POST /image-to-video` | Convert a static image to MP4 with optional animation | URL → MP4 |
@@ -94,7 +94,7 @@ Open `http://your-vps-ip:9000` in your browser. Enter your API key in the sideba
 
 **Processing:**
 
-- **Merge** — paste a video URL and audio URL, choose a length mismatch strategy, get a merged MP4
+- **Merge** — paste a video URL and audio URL, choose a length strategy, control volumes for both the added audio and the video's original audio
 - **Animate** — apply Ken Burns zoom or pan animation to an image or video
 - **Combine** — concatenate multiple files into one (optional re-encode for mixed codecs)
 - **Image to Video** — convert a static image to MP4 with optional animation
@@ -104,11 +104,27 @@ Open `http://your-vps-ip:9000` in your browser. Enter your API key in the sideba
 
 **Storage:**
 
-- **Upload** — drag-and-drop or browse to upload any binary file (video, audio, image) and get back a URL instantly; optionally save into a named folder
-- **Folders** — create named collections, browse files inside each folder, preview inline, copy URLs, download, or delete
+- **Upload** — drag-and-drop or browse to upload any binary file; audio files go to the `audio` folder automatically, all others go to `upload`; optionally override with a custom folder name
+- **Folders** — browse named folders (`upload`, `audio`, `main`, or custom), preview files inline, copy URLs, download, or delete
 - **Storage** — browse all job output files, click any file to preview inline, copy URL, download, or purge
 
 All result panels include an inline media preview, a copyable URL, and a download button. If an error occurs, a **▼ Show FFmpeg log** toggle reveals the raw FFmpeg stderr for diagnosis.
+
+---
+
+## Default Folders
+
+Several endpoints automatically route output to named folders when no `folder` is specified:
+
+| Endpoint | Default folder | Notes |
+|---|---|---|
+| `POST /upload` (audio file) | `audio` | `.mp3 .wav .m4a .ogg .aac .flac .opus .wma` |
+| `POST /upload` (any other file) | `upload` | Video, image, or unknown type |
+| `POST /combine` | `main` | Override with `"folder"` in the request body |
+| `POST /merge` | *(no default — returns job URL)* | Set `"folder"` to save to a named folder |
+| Other processing endpoints | *(no default — returns job URL)* | Set `"folder"` to save to a named folder |
+
+All folders are **created automatically** if they don't exist. You never need to pre-create a folder before using it.
 
 ---
 
@@ -122,15 +138,27 @@ X-API-Key: your-secret-key
 
 Interactive docs (Swagger UI): `http://your-vps-ip:9000/docs`
 
-All processing endpoints return at minimum:
+Processing endpoints return a `/store/` URL when a folder is used, or a `/files/` URL otherwise:
 
+**With folder:**
 ```json
 {
-  "url": "http://your-vps-ip:9000/files/{job_id}/output.mp4",
-  "filename": "output.mp4",
+  "url": "http://your-vps-ip:9000/store/MyProject/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
+  "folder": "MyProject"
+}
+```
+
+**Without folder (job storage):**
+```json
+{
+  "url": "http://your-vps-ip:9000/files/uuid/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
   "job_id": "uuid"
 }
 ```
+
+Output filenames are always **randomized** (8-character hex token + extension) to avoid collisions.
 
 Some endpoints include an optional `"warning"` field when a fallback was applied (see `/merge`).
 
@@ -138,20 +166,18 @@ Some endpoints include an optional `"warning"` field when a fallback was applied
 
 ### POST /merge
 
-Merges a video and audio file. The `strategy` field controls how a length mismatch is handled.
+Merges a video and audio file. Controls length mismatch strategy and independent volume for each audio source.
 
 **Request body:**
 
-```json
-{
-  "video_url": "https://example.com/video.mp4",
-  "audio_url": "https://example.com/audio.mp3",
-  "strategy": "trim_or_slow",
-  "folder": "MyProject"
-}
-```
-
-`folder` is optional. When set, the output is saved into that named folder (case-sensitive, must exist — create it first via `POST /folders`) and the response returns a `/store/` URL instead of a `/files/` URL.
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `video_url` | string | required | URL of the video file |
+| `audio_url` | string | required | URL of the audio file to add |
+| `strategy` | string | `"speed_match"` | How to handle length mismatch (see table below) |
+| `audio_volume` | float | `1.0` | Volume multiplier for the added audio (`0.5` = half, `2.0` = double, max `4.0`) |
+| `video_audio_volume` | float | `0.0` | Volume of the video's original audio to mix in (`0.0` = ignore, `0.3` = 30%) |
+| `folder` | string | none | Save output to this named folder (auto-created if missing) |
 
 **`strategy` values:**
 
@@ -161,21 +187,18 @@ Merges a video and audio file. The `strategy` field controls how a length mismat
 | `speed_match` | Speed up video to match audio | Slow video down to match audio |
 | `trim` | Cut at whichever stream ends first | Cut at whichever stream ends first |
 
-**Duration detection fallback:** The server probes duration from the container header first, then falls back to stream-level headers. If duration cannot be determined for either file, the chosen strategy is skipped and `trim` (`-shortest`) is applied automatically. A `"warning"` field is added to the response:
+**Volume behaviour:**
+- `audio_volume=1.0, video_audio_volume=0.0` (defaults) — replaces video audio entirely with the added audio at original volume
+- `audio_volume=1.5` — boosts the added audio by 50%
+- `video_audio_volume=0.2` — keeps the video's original audio at 20% and mixes it with the added audio
+- When any volume param is non-default, audio is re-encoded to AAC
 
-```json
-{
-  "url": "...",
-  "filename": "output.mp4",
-  "job_id": "uuid",
-  "warning": "Could not detect one or both media durations. video=unknown, audio=12.50s. Fell back to 'Trim to Shortest' — output ends when either stream ends."
-}
-```
+**Duration detection fallback:** If duration cannot be determined for either file, `trim` (`-shortest`) is applied automatically and a `"warning"` field is added to the response.
 
 **curl:**
 
 ```bash
-# trim_or_slow — trim if video is longer, slow down if shorter
+# Basic merge — replace video audio with added audio
 curl -X POST http://localhost:9000/merge \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
@@ -183,6 +206,29 @@ curl -X POST http://localhost:9000/merge \
     "video_url": "https://example.com/video.mp4",
     "audio_url": "https://example.com/audio.mp3",
     "strategy": "trim_or_slow"
+  }'
+
+# Boost added audio, keep quiet background from video
+curl -X POST http://localhost:9000/merge \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key" \
+  -d '{
+    "video_url": "https://example.com/video.mp4",
+    "audio_url": "https://example.com/audio.mp3",
+    "strategy": "trim_or_slow",
+    "audio_volume": 1.5,
+    "video_audio_volume": 0.2
+  }'
+
+# Silence the video audio completely, use added audio at half volume
+curl -X POST http://localhost:9000/merge \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key" \
+  -d '{
+    "video_url": "https://example.com/video.mp4",
+    "audio_url": "https://example.com/audio.mp3",
+    "strategy": "trim_or_slow",
+    "audio_volume": 0.5
   }'
 
 # speed_match — stretch or compress video speed to fit audio exactly
@@ -195,17 +241,7 @@ curl -X POST http://localhost:9000/merge \
     "strategy": "speed_match"
   }'
 
-# trim — cut at the shorter stream, no speed change
-curl -X POST http://localhost:9000/merge \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-secret-key" \
-  -d '{
-    "video_url": "https://example.com/video.mp4",
-    "audio_url": "https://example.com/audio.mp3",
-    "strategy": "trim"
-  }'
-
-# save output directly to a named folder (MyProject must exist)
+# Save output to a named folder (auto-created if it doesn't exist)
 curl -X POST http://localhost:9000/merge \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
@@ -213,16 +249,16 @@ curl -X POST http://localhost:9000/merge \
     "video_url": "https://example.com/video.mp4",
     "audio_url": "https://example.com/audio.mp3",
     "strategy": "trim_or_slow",
-    "folder": "MyProject"
+    "folder": "roman"
   }'
 ```
 
-**Response with folder:**
+**Response (with folder):**
 ```json
 {
-  "url": "http://localhost:9000/store/MyProject/output.mp4",
-  "filename": "output.mp4",
-  "folder": "MyProject"
+  "url": "http://your-vps-ip:9000/store/roman/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
+  "folder": "roman"
 }
 ```
 
@@ -287,7 +323,9 @@ curl -X POST http://localhost:9000/animate \
 
 ### POST /combine
 
-Concatenates multiple video or audio files into one.
+Concatenates multiple video or audio files into a single output.
+
+Output goes to the **`main`** folder by default. Override with `"folder"` in the request body.
 
 **Request body:**
 
@@ -303,12 +341,12 @@ Concatenates multiple video or audio files into one.
 }
 ```
 
-`folder` is optional — see [folder output](#folder-output) below. Set `"type": "audio"` for MP3 output. Set `"reencode": true` for mixed-codec sources — slower but always compatible.
+Set `"type": "audio"` for MP3 output. Set `"reencode": true` for mixed-codec sources — slower but always compatible.
 
 **curl:**
 
 ```bash
-# Combine videos (stream copy — all clips must share codec/resolution)
+# Combine videos — output goes to "main" folder by default
 curl -X POST http://localhost:9000/combine \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
@@ -338,7 +376,7 @@ curl -X POST http://localhost:9000/combine \
     "reencode": true
   }'
 
-# Save output to a named folder
+# Override output folder
 curl -X POST http://localhost:9000/combine \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret-key" \
@@ -348,6 +386,15 @@ curl -X POST http://localhost:9000/combine \
     "reencode": false,
     "folder": "MyProject"
   }'
+```
+
+**Response:**
+```json
+{
+  "url": "http://your-vps-ip:9000/store/main/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
+  "folder": "main"
+}
 ```
 
 ---
@@ -534,29 +581,29 @@ curl -X POST http://localhost:9000/concat-transitions \
 
 ### Folder output
 
-All processing endpoints (`/merge`, `/animate`, `/combine`, `/image-to-video`, `/loop`, `/concat-transitions`) accept an optional `"folder"` field in the request body.
+All processing endpoints accept an optional `"folder"` field. `/combine` defaults to `"main"` when omitted; all others return a `/files/` job URL when no folder is specified.
 
-When `folder` is set:
-- The output file is copied into `/data/folders/{folder}/` (served at `/store/{folder}/`)
-- The response returns a `/store/` URL and a `"folder"` key instead of `"job_id"`
+When `folder` is set (or defaulted):
+- The output is copied into `/data/folders/{folder}/` (served at `/store/{folder}/`)
+- The response returns a `/store/` URL and a `"folder"` key
 - The folder is **created automatically** if it does not exist
-- Folder names are **case-sensitive** (`MyProject` ≠ `myproject`)
-- If a file with the same name already exists in the folder, a suffix (`_1`, `_2`, …) is appended automatically
+- Folder names are sanitized — only alphanumeric, hyphens, underscores (max 64 chars)
+- Output filenames are **randomized** — collisions are impossible
 
 **Response shape (with folder):**
 ```json
 {
-  "url": "http://localhost:9000/store/MyProject/output.mp4",
-  "filename": "output.mp4",
+  "url": "http://your-vps-ip:9000/store/MyProject/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
   "folder": "MyProject"
 }
 ```
 
-**Response shape (without folder — default):**
+**Response shape (without folder — job storage):**
 ```json
 {
-  "url": "http://localhost:9000/files/uuid/output.mp4",
-  "filename": "output.mp4",
+  "url": "http://your-vps-ip:9000/files/uuid/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
   "job_id": "uuid"
 }
 ```
@@ -605,36 +652,42 @@ curl -X POST http://localhost:9000/metadata \
 
 Converts any binary file (video, audio, image, or anything else) into a persistent URL. Accepts multipart form data.
 
-Files are always stored in a named folder. If no `folder` is specified, the file goes into the default **`upload`** folder. The folder is created automatically if it does not exist. Filenames are **randomized** (e.g. `a3f8b2c1.mp3`) to avoid collisions.
+Files are always stored in a named folder. The default folder is chosen automatically by file type:
+
+| File type | Default folder |
+|---|---|
+| `.mp3 .wav .m4a .ogg .aac .flac .opus .wma` | `audio` |
+| Everything else (video, image, etc.) | `upload` |
+
+Pass `folder=name` to override the default. The folder is created automatically if it does not exist. Filenames are **randomized** (e.g. `a3f8b2c1.mp3`) — no collisions.
 
 **curl:**
 
 ```bash
-# Upload to the default "upload" folder
+# Upload a video — goes to "upload" folder automatically
 curl -X POST http://localhost:9000/upload \
   -H "X-API-Key: your-secret-key" \
   -F "file=@/path/to/video.mp4"
 
-# Upload into a specific named folder
+# Upload an audio file — goes to "audio" folder automatically
+curl -X POST http://localhost:9000/upload \
+  -H "X-API-Key: your-secret-key" \
+  -F "file=@/path/to/track.mp3"
+
+# Override folder explicitly
 curl -X POST http://localhost:9000/upload \
   -H "X-API-Key: your-secret-key" \
   -F "file=@/path/to/photo.jpg" \
   -F "folder=my-project"
-
-# Upload an audio file into a folder
-curl -X POST http://localhost:9000/upload \
-  -H "X-API-Key: your-secret-key" \
-  -F "file=@/path/to/track.mp3" \
-  -F "folder=audio-assets"
 ```
 
 **Response:**
 
 ```json
 {
-  "url": "http://your-vps-ip:9000/store/upload/a3f8b2c1.mp4",
-  "filename": "a3f8b2c1.mp4",
-  "folder": "upload",
+  "url": "http://your-vps-ip:9000/store/audio/a3f8b2c1.mp3",
+  "filename": "a3f8b2c1.mp3",
+  "folder": "audio",
   "size_bytes": 4823042
 }
 ```
@@ -659,10 +712,11 @@ curl http://localhost:9000/folders \
 ```json
 {
   "folders": [
-    { "name": "my-project",   "file_count": 3, "total_size_bytes": 1048576 },
-    { "name": "audio-assets", "file_count": 7, "total_size_bytes": 8388608 }
+    { "name": "audio",  "file_count": 5, "total_size_bytes": 2097152 },
+    { "name": "main",   "file_count": 3, "total_size_bytes": 1048576 },
+    { "name": "upload", "file_count": 2, "total_size_bytes": 524288 }
   ],
-  "count": 2
+  "count": 3
 }
 ```
 
@@ -687,7 +741,7 @@ curl -X POST http://localhost:9000/folders \
 { "name": "my-project", "created": true }
 ```
 
-Folder names are sanitized — only alphanumeric characters, hyphens, and underscores are kept (max 64 chars). You can also create folders implicitly by passing `folder=name` in `POST /upload`.
+Folder names are sanitized — only alphanumeric characters, hyphens, and underscores are kept (max 64 chars). Folders are also created automatically by upload and all processing endpoints when needed.
 
 ---
 
@@ -698,7 +752,7 @@ List all files inside a folder.
 **curl:**
 
 ```bash
-curl http://localhost:9000/folders/my-project \
+curl http://localhost:9000/folders/audio \
   -H "X-API-Key: your-secret-key"
 ```
 
@@ -706,13 +760,13 @@ curl http://localhost:9000/folders/my-project \
 
 ```json
 {
-  "folder": "my-project",
+  "folder": "audio",
   "files": [
     {
-      "filename": "photo.jpg",
-      "url": "http://your-vps-ip:9000/store/my-project/photo.jpg",
+      "filename": "a3f8b2c1.mp3",
+      "url": "http://your-vps-ip:9000/store/audio/a3f8b2c1.mp3",
       "size_bytes": 204800,
-      "created_at": "2026-03-13T12:00:00"
+      "created_at": "2026-03-14T12:00:00"
     }
   ],
   "count": 1,
@@ -733,7 +787,7 @@ Returns all file URLs in a folder formatted as a ready-to-use body for `POST /co
 **curl:**
 
 ```bash
-curl "http://localhost:9000/folders/my-project/urls?type=video&reencode=false" \
+curl "http://localhost:9000/folders/main/urls?type=video&reencode=false" \
   -H "X-API-Key: your-secret-key"
 ```
 
@@ -743,8 +797,8 @@ curl "http://localhost:9000/folders/my-project/urls?type=video&reencode=false" \
 {
   "type": "video",
   "urls": [
-    "http://your-vps-ip:9000/store/my-project/clip1.mp4",
-    "http://your-vps-ip:9000/store/my-project/clip2.mp4"
+    "http://your-vps-ip:9000/store/main/a3f8b2c1.mp4",
+    "http://your-vps-ip:9000/store/main/b4c9d2e5.mp4"
   ],
   "reencode": false,
   "count": 2
@@ -779,14 +833,14 @@ Delete a single file from a folder.
 **curl:**
 
 ```bash
-curl -X DELETE http://localhost:9000/folders/my-project/photo.jpg \
+curl -X DELETE http://localhost:9000/folders/audio/a3f8b2c1.mp3 \
   -H "X-API-Key: your-secret-key"
 ```
 
 **Response:**
 
 ```json
-{ "deleted": "photo.jpg", "folder": "my-project" }
+{ "deleted": "a3f8b2c1.mp3", "folder": "audio" }
 ```
 
 ---
@@ -809,10 +863,10 @@ curl http://localhost:9000/files \
   "files": [
     {
       "job_id": "uuid",
-      "filename": "output.mp4",
-      "url": "http://your-vps-ip:9000/files/uuid/output.mp4",
+      "filename": "a3f8b2c1.mp4",
+      "url": "http://your-vps-ip:9000/files/uuid/a3f8b2c1.mp4",
       "size_bytes": 4823042,
-      "created_at": "2026-03-13T12:00:00"
+      "created_at": "2026-03-14T12:00:00"
     }
   ],
   "count": 1,
@@ -898,6 +952,7 @@ The web UI surfaces the `error` message directly. A **▼ Show FFmpeg log** togg
 | `Output file is empty` | Silent failure — usually a filter error | Expand the FFmpeg log in the UI |
 | xfade `Could not determine duration` | Clip has no duration metadata | Pre-process with `/metadata` to verify, or re-encode the source |
 | `HTTP 413` on `/upload` | File exceeds 500 MB limit | Compress or split the file first |
+| `File not found on server` | `/store/` or `/files/` URL points to a deleted file | Re-upload the file and use the new URL |
 
 All FFmpeg and ffprobe errors are logged server-side (Python `logging`) with the full command line and stderr tail for every failed job.
 
@@ -909,10 +964,20 @@ There are two independent storage areas:
 
 | Area | Path (container) | Served at | Purpose |
 |---|---|---|---|
-| Job outputs | `/data/outputs/{uuid}/` | `/files/{uuid}/{filename}` | Results from processing endpoints |
-| Named folders | `/data/folders/{name}/` | `/store/{name}/{filename}` | Uploaded files organized by folder |
+| Job outputs | `/data/outputs/{uuid}/` | `/files/{uuid}/{filename}` | Results from processing endpoints (no folder set) |
+| Named folders | `/data/folders/{name}/` | `/store/{name}/{filename}` | Uploads and processing outputs routed to a folder |
 
-Both are Docker volumes that persist across container restarts. Neither path requires authentication to read — the URL itself acts as the access token. Add a reverse proxy with authentication if you need access control.
+**Built-in named folders** (created automatically on first use):
+
+| Folder | Used by |
+|---|---|
+| `audio` | Audio file uploads (`.mp3`, `.wav`, `.m4a`, etc.) |
+| `upload` | Non-audio file uploads (video, image, etc.) |
+| `main` | `/combine` output (default) |
+
+Both storage areas are Docker volumes that persist across container restarts. Neither path requires authentication to read — the URL itself acts as the access token. Add a reverse proxy with authentication if you need access control.
+
+When a processing endpoint uses a `/store/` URL as input (e.g. feeding a merge output back into another merge), the server reads the file directly from disk — no HTTP round-trip needed.
 
 Create both directories on the host before starting:
 
@@ -936,23 +1001,23 @@ mkdir -p /data/outputs /data/folders
 ## Project Structure
 
 ```
-chromaffmpeg/
+ChromaFFmpeg/
 ├── app/
 │   ├── main.py               # FastAPI app, router registration, static mounts
 │   ├── auth.py               # API key header verification
 │   ├── routes/
-│   │   ├── merge.py          # Merge video + audio (trim_or_slow / speed_match / trim)
+│   │   ├── merge.py          # Merge video + audio (volume control, strategy)
 │   │   ├── animate.py        # Ken Burns / zoom / pan effects
-│   │   ├── combine.py        # Concatenate multiple files
+│   │   ├── combine.py        # Concatenate multiple files (default folder: main)
 │   │   ├── image_to_video.py # Image → MP4 with optional animation
 │   │   ├── loop.py           # Repeat a clip N times via concat demuxer
 │   │   ├── transitions.py    # xfade + acrossfade transitions
 │   │   ├── metadata.py       # ffprobe media info
-│   │   ├── upload.py         # Binary upload → persistent URL
+│   │   ├── upload.py         # Binary upload → persistent URL (smart default folders)
 │   │   ├── folders.py        # Named folder CRUD
 │   │   └── files.py          # List / purge job outputs
 │   └── utils/
-│       ├── downloader.py     # Async chunked HTTP download
+│       ├── downloader.py     # HTTP download + direct disk copy for self-referencing URLs
 │       ├── ffmpeg.py         # FFmpeg/ffprobe subprocess wrappers + duration probing
 │       ├── cleanup.py        # Job directory management
 │       ├── folders.py        # Folder utilities (sanitize, create, list, delete)
@@ -972,9 +1037,13 @@ chromaffmpeg/
 
 - Output files and uploaded files are **never deleted automatically** — purge via the UI or the DELETE endpoints
 - `/files/` and `/store/` routes are **unauthenticated** — the URL acts as the access token; add a reverse proxy with auth if needed
+- All output filenames are **randomized** (8-character hex + extension) — collisions are impossible
+- Folders are **created automatically** — you never need to pre-create a folder before using it
+- When a processing endpoint downloads a `/store/` or `/files/` URL from this server, it reads the file directly from disk (no HTTP round-trip) — this avoids Docker networking issues and is faster
+- `/merge` with `audio_volume` or `video_audio_volume` re-encodes audio to AAC; without volume params it stream-copies audio (faster, lossless)
 - The `zoompan` filter (`/animate`, `/image-to-video`) is CPU-intensive — a 6 s 1080p animation can take 30–90 s depending on hardware
 - `/combine` with `reencode: false` requires all inputs to share the same codec, resolution, and sample rate; use `reencode: true` for mixed sources
 - `/concat-transitions` requires all clips to share the same resolution and fps — the xfade filter errors if dimensions differ
 - `/loop` uses the concat demuxer with stream copy — output is generated near-instantly regardless of loop count
 - `/merge` duration probing tries the container header first, then falls back to stream-level headers; if both fail the response includes a `"warning"` and uses `-shortest` as a safe fallback
-- `/upload` chunks file reads at 1 MB and enforces a 500 MB hard limit; name collisions in folders are resolved automatically with a numeric suffix
+- `/upload` chunks file reads at 1 MB and enforces a 500 MB hard limit
