@@ -36,8 +36,8 @@ A self-hosted FFmpeg API with a built-in web UI. Submit media URLs or upload bin
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/you/chromaffmpeg.git
-cd chromaffmpeg
+git clone https://github.com/leksautomate/ChromaFFmpeg.git
+cd ChromaFFmpeg
 cp .env.example .env
 ```
 
@@ -56,6 +56,34 @@ docker compose up --build -d
 ```
 
 The API and UI are live at `http://your-vps-ip:9000`
+
+---
+
+## Updating the code on your VPS
+
+SSH into your server, then pull the latest code and rebuild the container:
+
+```bash
+cd ChromaFFmpeg
+git pull origin master
+docker compose up --build -d
+```
+
+That's it. Your `.env` and `/data/` volumes are untouched — no files are lost.
+
+**Verify the update worked:**
+
+```bash
+docker compose ps          # container should be Up
+curl http://localhost:9000/health
+# {"status":"ok"}
+```
+
+**If the container fails to start, check the logs:**
+
+```bash
+docker compose logs --tail=50
+```
 
 ---
 
@@ -510,7 +538,7 @@ All processing endpoints (`/merge`, `/animate`, `/combine`, `/image-to-video`, `
 When `folder` is set:
 - The output file is copied into `/data/folders/{folder}/` (served at `/store/{folder}/`)
 - The response returns a `/store/` URL and a `"folder"` key instead of `"job_id"`
-- The folder **must already exist** — create it first with `POST /folders`
+- The folder is **created automatically** if it does not exist
 - Folder names are **case-sensitive** (`MyProject` ≠ `myproject`)
 - If a file with the same name already exists in the folder, a suffix (`_1`, `_2`, …) is appended automatically
 
@@ -574,17 +602,19 @@ curl -X POST http://localhost:9000/metadata \
 
 ### POST /upload
 
-Converts any binary file (video, audio, image, or anything else) into a persistent URL. Accepts multipart form data. Optionally saves into a named folder — if the folder does not exist it is created automatically.
+Converts any binary file (video, audio, image, or anything else) into a persistent URL. Accepts multipart form data.
+
+Files are always stored in a named folder. If no `folder` is specified, the file goes into the default **`upload`** folder. The folder is created automatically if it does not exist. Filenames are **randomized** (e.g. `a3f8b2c1.mp3`) to avoid collisions.
 
 **curl:**
 
 ```bash
-# Upload to general job storage
+# Upload to the default "upload" folder
 curl -X POST http://localhost:9000/upload \
   -H "X-API-Key: your-secret-key" \
   -F "file=@/path/to/video.mp4"
 
-# Upload into a named folder
+# Upload into a specific named folder
 curl -X POST http://localhost:9000/upload \
   -H "X-API-Key: your-secret-key" \
   -F "file=@/path/to/photo.jpg" \
@@ -597,29 +627,18 @@ curl -X POST http://localhost:9000/upload \
   -F "folder=audio-assets"
 ```
 
-**Response (no folder):**
+**Response:**
 
 ```json
 {
-  "url": "http://your-vps-ip:9000/files/{job_id}/video.mp4",
-  "filename": "video.mp4",
-  "job_id": "uuid",
+  "url": "http://your-vps-ip:9000/store/upload/a3f8b2c1.mp4",
+  "filename": "a3f8b2c1.mp4",
+  "folder": "upload",
   "size_bytes": 4823042
 }
 ```
 
-**Response (with folder):**
-
-```json
-{
-  "url": "http://your-vps-ip:9000/store/my-project/photo.jpg",
-  "filename": "photo.jpg",
-  "folder": "my-project",
-  "size_bytes": 204800
-}
-```
-
-Maximum file size: **500 MB**. If a file with the same name already exists in the folder, a numeric suffix is added automatically (`photo_1.jpg`, `photo_2.jpg`, …).
+Maximum file size: **500 MB**.
 
 ---
 
