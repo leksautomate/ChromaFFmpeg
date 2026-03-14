@@ -15,7 +15,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 MAX_BYTES = 500 * 1024 * 1024  # 500 MB
-DEFAULT_UPLOAD_FOLDER = "upload"
+
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac", ".opus", ".wma"}
+
+
+def _default_folder(filename: str) -> str:
+    """Return 'audio' for audio files, 'upload' for everything else."""
+    _, ext = os.path.splitext(filename)
+    return "audio" if ext.lower() in AUDIO_EXTENSIONS else "upload"
 
 
 def _random_filename(original: str) -> str:
@@ -80,7 +87,7 @@ async def upload_file(
     automatically (`photo_1.jpg`, `photo_2.jpg`, …).
     """
     raw_name = file.filename or "upload"
-    target_folder = folder if folder else DEFAULT_UPLOAD_FOLDER
+    target_folder = folder if folder else _default_folder(raw_name)
 
     try:
         safe_folder = create_folder(target_folder)

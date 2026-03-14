@@ -1,4 +1,5 @@
 import os
+import secrets
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -93,7 +94,7 @@ async def combine(req: CombineRequest):
                 f.write(f"file '{p}'\n")
 
         ext = "mp4" if req.type == "video" else "mp3"
-        output_filename = f"output.{ext}"
+        output_filename = secrets.token_hex(8) + f".{ext}"
         output_path = os.path.join(job_dir, output_filename)
 
         codec_args = ["-c:v", "libx264", "-c:a", "aac", "-ar", "44100"] if req.reencode else ["-c", "copy"]
@@ -105,7 +106,8 @@ async def combine(req: CombineRequest):
             output_path,
         ])
 
-        return resolve_output(job_dir, output_filename, req.folder)
+        effective_folder = req.folder if req.folder else "main"
+        return resolve_output(job_dir, output_filename, effective_folder)
     except Exception:
         cleanup_job_dir(job_dir)
         raise
