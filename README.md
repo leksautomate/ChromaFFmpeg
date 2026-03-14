@@ -16,7 +16,8 @@ A self-hosted FFmpeg API with a built-in web UI. Submit media URLs or upload bin
 | `POST /image-to-video` | Convert a static image to MP4 with optional animation | URL → MP4 |
 | `POST /loop` | Repeat a video clip N times (stream copy, no re-encode) | URL → MP4 |
 | `POST /concat-transitions` | Concatenate clips with xfade transitions between them | URL → MP4 |
-| `POST /metadata` | Get duration, resolution, fps, bitrate, stream info | JSON |
+| `POST /metadata` | Get duration, resolution, fps, bitrate, stream info from a URL | JSON |
+| `POST /metadata/upload` | Get metadata by uploading a binary file directly | JSON |
 | `POST /upload` | Upload any binary file and get back a persistent URL | JSON |
 | `GET /folders` | List all named folders | JSON |
 | `POST /folders` | Create a named folder | JSON |
@@ -635,7 +636,7 @@ curl -X POST http://localhost:9000/metadata \
 {
   "duration_seconds": 47.32,
   "duration_formatted": "0:00:47",
-  "format": "mov,mp4,m4a,3gp,3g2,mj2",
+  "format": "mov",
   "size_bytes": 4823042,
   "video_streams": 1,
   "audio_streams": 1,
@@ -645,6 +646,22 @@ curl -X POST http://localhost:9000/metadata \
   "bitrate_kbps": 2048
 }
 ```
+
+---
+
+### POST /metadata/upload
+
+Upload a binary file directly and get its metadata — no need to host the file first. The file is deleted from the server immediately after probing.
+
+**curl:**
+
+```bash
+curl -X POST http://localhost:9000/metadata/upload \
+  -H "X-API-Key: your-secret-key" \
+  -F "file=@/path/to/video.mp4"
+```
+
+**Response:** same shape as `POST /metadata`.
 
 ---
 
