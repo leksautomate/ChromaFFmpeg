@@ -61,11 +61,15 @@ The API and UI are live at `http://your-vps-ip:9000`
 
 ## Updating the code on your VPS
 
-SSH into your server, then run:
+SSH into your server. First find where the repo lives if you're unsure:
 
 ```bash
-cd /var/www/ChromaFFmpeg
+find / -name "docker-compose.yml" -not -path "*/proc/*" 2>/dev/null
+```
 
+Then `cd` into that directory and run:
+
+```bash
 # Pull latest
 git pull origin master
 
