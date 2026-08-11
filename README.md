@@ -4,6 +4,8 @@ A self-hosted FFmpeg API with a built-in web UI. Submit media URLs or upload bin
 
 **Stack:** Python 3.11 · FastAPI · FFmpeg · Alpine.js · Docker
 
+> **Need a VPS to deploy this on?** [Spin one up here](https://www.anrdoezrs.net/click-101758174-12454592?sid=github) — this is a referral link that helps support the project at no extra cost to you.
+
 ---
 
 ## Features
