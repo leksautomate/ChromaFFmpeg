@@ -1017,6 +1017,54 @@ mkdir -p /data/outputs /data/folders
 
 ---
 
+## Architecture & Trust Boundaries
+
+A request that touches remote media crosses several trust boundaries. This section documents
+them explicitly for anyone reviewing the security posture of a self-hosted deployment; see
+[SECURITY.md](SECURITY.md) for how to report an issue with any of them.
+
+**1. Auth boundary — `X-API-Key`.** Every route except `/health`, `/`, and the `/files`,
+`/store`, `/static` mounts requires the header (`app/auth.py`, checked with
+`secrets.compare_digest`). It's a single shared secret with no per-client scoping — anyone
+holding it can process, list, and permanently delete everything the service has stored.
+
+**2. Remote-URL fetch boundary — SSRF surface.** `POST /merge`, `/animate`, `/combine`,
+`/image-to-video`, `/loop`, and `/concat-transitions` all accept URLs and fetch them via
+`app/utils/downloader.py`, an `httpx` client with `follow_redirects=True`. **There is currently no
+private-IP/hostname allowlist and no size cap on these downloads** (unlike `POST /upload`, which
+enforces a 500 MB limit on direct file uploads). If you deploy this where the server itself sits
+on a network with reachable internal services (cloud metadata endpoints, internal APIs, etc.),
+treat any URL-accepting endpoint as capable of reaching them. This is a known, currently
+unmitigated gap — not a design decision — and a good first contribution if you want to help.
+
+**3. Direct-ffprobe boundary — `POST /metadata`.** Unlike every other route, `/metadata` hands
+its `url` field straight to the `ffprobe` subprocess instead of going through the downloader,
+because it's only probing metadata, not producing output. That means FFmpeg's own protocol layer
+(`file:`, `concat:`, `subfile:`, `pipe:`, etc.) would otherwise be reachable directly through this
+one field. It's mitigated by rejecting any non-`http(s)` scheme at the Pydantic layer and setting
+`-protocol_whitelist http,https,tcp,tls` on the ffprobe invocation (`app/routes/metadata.py`), so
+a fetched playlist/manifest can't reference local files either. `POST /metadata/upload` doesn't
+have this problem — it always probes a file this server just wrote to disk.
+
+**4. Same-origin short-circuit.** When a supplied URL points back at this server's own `/files/`
+or `/store/` path, `download_file()` copies the file directly from disk instead of making an HTTP
+request (`app/utils/downloader.py: _local_path_for_url`). This is a deliberate perf/reliability
+optimization (avoids Docker loopback networking issues) — but it means a self-referencing URL is
+trusted as-is, with no re-validation of what's already on disk.
+
+**5. Subprocess boundary — FFmpeg/ffprobe.** Every processing and metadata endpoint eventually
+runs `ffmpeg`/`ffprobe` against attacker-influenced bytes (`app/utils/ffmpeg.py`). Parser
+vulnerabilities in FFmpeg itself are FFmpeg's attack surface, not this project's, but they're real
+if you're processing media from untrusted sources — keep the FFmpeg build in the Docker image
+current.
+
+**6. Output/storage boundary.** `/files/*` and `/store/*` are unauthenticated `StaticFiles`
+mounts (`app/main.py`) — the random 8-hex-char filename in the URL *is* the access token, not the
+`X-API-Key` header. There's no TTL or auto-expiry; output accumulates until purged via the
+`DELETE` endpoints. See [Storage](#storage) above for the two areas this covers.
+
+---
+
 ## Project Structure
 
 ```

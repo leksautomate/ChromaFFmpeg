@@ -8,6 +8,10 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
+.venv/
+.venv-test/
+venv/
+.pytest_cache/
 
 # Output data
 outputs/
