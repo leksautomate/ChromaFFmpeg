@@ -2,9 +2,10 @@ import json
 import logging
 import os
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.auth import verify_api_key
 from app.utils.cleanup import cleanup_job_dir, make_job_dir
@@ -14,9 +15,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
+# ffprobe is handed this URL directly (not via the httpx downloader), so its own
+# protocol layer would otherwise happily open file:, concat:, subfile:, etc.
+# Restricting both the input scheme and ffprobe's protocol_whitelist closes that off.
+FFPROBE_URL_PROTOCOLS = "http,https,tcp,tls"
+
 
 class MetadataRequest(BaseModel):
     url: str
+
+    @field_validator("url")
+    @classmethod
+    def _require_http_scheme(cls, v: str) -> str:
+        if urlparse(v).scheme.lower() not in ("http", "https"):
+            raise ValueError("url must be an http:// or https:// URL")
+        return v
 
 
 def _parse_ffprobe_output(output: str, source: str) -> dict:
@@ -78,6 +91,7 @@ async def get_metadata(req: MetadataRequest):
     """
     output = await run_ffprobe([
         "-v", "quiet",
+        "-protocol_whitelist", FFPROBE_URL_PROTOCOLS,
         "-print_format", "json",
         "-show_format",
         "-show_streams",
