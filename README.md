@@ -1014,6 +1014,8 @@ mkdir -p /data/outputs /data/folders
 | `BASE_URL` | Public base URL embedded in returned file URLs | `http://localhost:9000` |
 | `OUTPUTS_DIR` | Directory for job output files inside the container | `/data/outputs` |
 | `FOLDERS_DIR` | Directory for named folder files inside the container | `/data/folders` |
+| `MAX_DOWNLOAD_BYTES` | Max size for a remote URL fetched by a processing endpoint | `2147483648` (2 GiB) |
+| `ALLOW_PRIVATE_NETWORK_URLS` | Set `true` to allow fetching from private/internal addresses | `false` |
 
 ---
 
@@ -1030,12 +1032,17 @@ holding it can process, list, and permanently delete everything the service has 
 
 **2. Remote-URL fetch boundary — SSRF surface.** `POST /merge`, `/animate`, `/combine`,
 `/image-to-video`, `/loop`, and `/concat-transitions` all accept URLs and fetch them via
-`app/utils/downloader.py`, an `httpx` client with `follow_redirects=True`. **There is currently no
-private-IP/hostname allowlist and no size cap on these downloads** (unlike `POST /upload`, which
-enforces a 500 MB limit on direct file uploads). If you deploy this where the server itself sits
-on a network with reachable internal services (cloud metadata endpoints, internal APIs, etc.),
-treat any URL-accepting endpoint as capable of reaching them. This is a known, currently
-unmitigated gap — not a design decision — and a good first contribution if you want to help.
+`app/utils/downloader.py`. Before connecting (and again on every redirect hop, since redirects
+are followed manually rather than via httpx's `follow_redirects=True`), the target hostname is
+resolved and rejected if it points at a private, loopback, link-local, multicast, or reserved
+address — this covers cloud metadata endpoints (`169.254.169.254`) as well as RFC1918 ranges.
+Downloads are also capped at `MAX_DOWNLOAD_BYTES` (default 2 GiB, configurable), enforced during
+streaming rather than trusting the `Content-Length` header, with the partial file removed on
+failure. Set `ALLOW_PRIVATE_NETWORK_URLS=true` if you intentionally point this at an internal
+media server. **Residual risk:** the hostname is resolved once via `socket.getaddrinfo` and then
+connected to separately by httpx — a DNS answer that changes between those two steps (DNS
+rebinding) isn't caught. Pinning the resolved IP for the actual connection would close that; it
+hasn't been done here.
 
 **3. Direct-ffprobe boundary — `POST /metadata`.** Unlike every other route, `/metadata` hands
 its `url` field straight to the `ffprobe` subprocess instead of going through the downloader,
